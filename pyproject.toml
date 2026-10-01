@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isokrus"
+version = "0.1.0"
+description = "Расчёт длины трубопроводов по изометрическим чертежам с помощью vision-LLM"
+requires-python = ">=3.10"
+dependencies = [
+    "pymupdf>=1.24",
+    "openai>=1.40",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "openpyxl>=3.1",
+]
+
+[project.scripts]
+isokrus = "isokrus.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
