@@ -96,7 +96,10 @@ def _default_user_instruction(experiment: Experiment, page: PageImage) -> str:
         "Проанализируй этот лист изометрического чертежа трубопровода "
         "и верни результат строго по схеме."
     )
-    return f"{base}\n\nЛист № {page.page_number}. Размер изображения: {page.width}x{page.height} px."
+    return (
+        f"{base}\n\nЛист № {page.page_number}. "
+        f"Размер изображения: {page.width}x{page.height} px."
+    )
 
 
 def analyze_page(
@@ -228,7 +231,13 @@ def run(
     should_save = config.SAVE_PAGE_IMAGES if save_page_images is None else save_page_images
     if should_save:
         for result in results:
-            result.page.save(out_root / "pages", stem=result.page.label.rsplit(".", 1)[0])
+            stem = result.page.label.rsplit(".", 1)[0]
+            result.page.save(out_root / "pages", stem=stem)
+            # Ровно то, что ушло в модель: с подсветкой, с зачисткой и в
+            # обрезанных полях. Кладётся всегда, независимо от ``--no-images``:
+            # флаг экономит место на исходниках, а этот снимок — единственный
+            # способ проверить ответ модели по картинке.
+            result.page.save_model_image(out_root / "to_llm_imgs", stem=stem)
 
     finished = _now()
     return RunResult(

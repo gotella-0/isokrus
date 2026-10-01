@@ -103,6 +103,10 @@ def _summarize(run_result, created: dict) -> None:
     if annotated:
         print(f"  разметка: {len(annotated)} файл(ов) в {run_result.output_dir / 'annotated'}")
 
+    sent = list((run_result.output_dir / "to_llm_imgs").glob("*.png"))
+    if sent:
+        print(f"  в модель: {len(sent)} файл(ов) в {run_result.output_dir / 'to_llm_imgs'}")
+
 
 def _dims(args) -> list:
     """Извлечь страницы с разбором размеров и вернуть результат."""

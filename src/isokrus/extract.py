@@ -150,6 +150,24 @@ class PageImage:
         target.write_bytes(self.data)
         return target
 
+    def save_model_image(
+        self, directory: Path, stem: str | None = None
+    ) -> Path:
+        """Сохранение байтов, которые реально ушли в модель.
+
+        Отдельная папка не по прихоти: ``pages`` содержит исходный лист, а в
+        модель уходит ``model_image()`` — с подсветкой, с зачисткой и в
+        обрезанных полях. Сравнивать ответ модели с файлом из ``pages`` тогда
+        бессмысленно: картинки разные, и промах невозможно ни увидеть, ни
+        объяснить. Поэтому то, что видела модель, кладётся рядом и под своим
+        именем.
+        """
+        directory.mkdir(parents=True, exist_ok=True)
+        suffix = self.mime_type.split("/")[-1] or "png"
+        target = directory / f"{stem or self.name.rsplit('.', 1)[0]}.{suffix}"
+        target.write_bytes(self.model_image())
+        return target
+
 
 @dataclass
 class ExtractionResult:
