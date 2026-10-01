@@ -390,8 +390,8 @@ def build_parser() -> argparse.ArgumentParser:
         )
         sub.add_argument(
             "--clean", action="store_true",
-            help="закрасить на снимке знаки в квадратах, опорные знаки и "
-                 "числа, отвергнутые разбором (по умолчанию выключено)",
+            help="вырезать из PDF всё, что размером не является: координаты, "
+                 "номера узлов, штампы, словесный шум (по умолчанию выключено)",
         )
         sub.add_argument(
             "--no-clean", action="store_true",

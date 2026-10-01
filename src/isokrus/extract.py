@@ -32,11 +32,11 @@ from typing import Iterator, Sequence
 import pymupdf
 
 from . import config
-from .clean import apply_erasures, find_erasures
-from .clean import _segments as clean_segments
 from .dimscan import DimensionMark, DimParams, detect_page, marks_in_pixels
 from .errors import ExtractionError
 from .overlay import render_overlay
+from .prune import apply_plan, build_plan
+from .redact import guard_of
 from .textmap import TextItem, box_to_pixels, extract_text_items, inside_box, shifted_matrix
 from .trim import trim
 
@@ -270,10 +270,10 @@ def extract_pages(
     # разбор отверг, а отвергать нечем. Молча выключаем, а не падаем.
     want_clean = (config.DIMSCAN_CLEAN if with_clean is None else with_clean) \
         and want_dims
-    clean_set = tuple(
-        clean_filters if clean_filters is not None
-        else config.DIMSCAN_CLEAN_FILTERS
-    )
+    # ``clean_filters`` больше не используется: зачистка переехала с закрашивания
+    # по растру на вырезание из PDF, где вид зачистки задаётся ролью элемента,
+    # а не списком фильтров. Параметр оставлен, чтобы не ломать вызовы.
+    _ = clean_filters
 
     try:
         document = pymupdf.open(path)
@@ -314,6 +314,33 @@ def extract_pages(
                 except Exception as exc:
                     dim_error = f"{type(exc).__name__}: {exc}"
                     scan = None
+
+            # Шаг 1б: зачистка вырезом из PDF, до рендера. Лист векторный, и
+            # удалять элементы правильно на нём: в рендере не остаётся ни
+            # серого ореола от сглаживания, ни обрезки буквы, а подписи и
+            # рамки знаков исчезают из текстового слоя тоже — модель не видит
+            # их даже в списке текста.
+            #
+            # Раньше зачистка шла после рендера и закрашивала по растру, а
+            # обрезка полей — до неё. Теперь порядок обратный, и обрезка
+            # оказывается после зачистки: поля, освободившиеся после удаления
+            # подписей и штампов, срезаются тоже. Размеры считаются по
+            # разбору, сделанному до вырезания: координаты у них в пунктах
+            # PDF, и вырезание их не сдвигает.
+            redaction_info: dict = {}
+            redaction_error: str | None = None
+            if scan is not None and want_clean:
+                try:
+                    report = apply_plan(
+                        page, build_plan(page, scan), guard_of(scan.lines)
+                    )
+                    redaction_info = {
+                        "cut": report.total,
+                        "spared": len(report.skipped),
+                        "by_kind": report.counts(),
+                    }
+                except Exception as exc:  # зачистка — улучшение, не условие
+                    redaction_error = f"{type(exc).__name__}: {exc}"
 
             matrix = _scale_for(page, dpi, max_side)
             try:
@@ -393,36 +420,9 @@ def extract_pages(
                     text_error = f"{type(exc).__name__}: {exc}"
 
             # Шаг 6: зачистка листа от того, что размером не является. Идёт
-            # после текстового слоя: зачистка должна знать, что стоит внутри
-            # рамки — по одним контурам «2» и «О3» неразличимы.
-            clean_bytes = b""
-            clean_info: dict = {}
-            clean_error: str | None = None
-            if dims and want_clean and scan is not None:
-                try:
-                    view = PageImage(
-                        page_number=number, data=data, width=width,
-                        height=height, text_items=items, dimensions=dims,
-                        meta={"dpi": round(72.0 * matrix[0], 1),
-                              "trim": trim_info},
-                    )
-                    report = find_erasures(
-                        view, scan.contours,
-                        clean_segments(page.get_drawings(), scan.limits),
-                        scan.limits, clean_set,
-                    )
-                    clean_bytes = apply_erasures(
-                        data, width, height, [b.box for b in report.boxes]
-                    )
-                    clean_info = {
-                        "erased": report.total,
-                        "by_kind": report.counts(),
-                        # Что зачистка не смогла стереть, не задев размеры.
-                        "kept": len(report.conflicts),
-                        "filters": list(clean_set),
-                    }
-                except Exception as exc:  # зачистка — улучшение, не условие
-                    clean_error = f"{type(exc).__name__}: {exc}"
+            # Зачистка уже применена к странице, поэтому отдельной картинки
+            # нет: ``data`` и есть зачищенный лист. Поле ``cleaned`` остаётся
+            # пустым, и ``model_image`` отдаёт ``data``.
 
             # Шаг 7: подсветка размеров поверх зачистки. Иначе подсветка
             # вернула бы на лист ровно то, что зачистка только что убрала, а
@@ -430,7 +430,7 @@ def extract_pages(
             if dims and want_overlay:
                 try:
                     overlay_bytes = render_overlay(
-                        clean_bytes or data, width, height, dims
+                        data, width, height, dims
                     )
                 except Exception as exc:  # подсветка — улучшение, не условие
                     overlay_error = f"{type(exc).__name__}: {exc}"
@@ -445,7 +445,7 @@ def extract_pages(
                     text_items=items,
                     dimensions=dims,
                     rejected_numbers=rejected,
-                    cleaned=clean_bytes,
+                    cleaned=b"",
                     overlay=overlay_bytes,
                     meta={
                         "dpi": round(72.0 * matrix[0], 1),
@@ -455,8 +455,8 @@ def extract_pages(
                         "text_error": text_error,
                         "dimscan": dim_info or None,
                         "dimscan_error": dim_error,
-                        "clean": clean_info or None,
-                        "clean_error": clean_error,
+                        "clean": redaction_info or None,
+                        "clean_error": redaction_error,
                         "overlay": bool(overlay_bytes),
                         "overlay_error": overlay_error,
                         "trim": trim_info,
