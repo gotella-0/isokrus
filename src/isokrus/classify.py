@@ -57,18 +57,45 @@ _KEEP, _CUT = True, False
 
 PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
     (re.compile(r"^<\s*\d+\s*>$"), ROLE_NODE, "позиционный знак <N>"),
-    (re.compile(r"^[XYZxyz]\s*[+±]?\s*\d+"), ROLE_COORDINATE,
+    # Пробелов между буквой и числом может быть несколько: span-ы склеиваются с
+    # их исходным разделением, и «X  48300» с двумя пробелами — тот же
+    # координатный блок, что и «X 48300». На листе 1 из-за двойного пробела
+    # блок «X  48300 / DN50X50» не узнавался и уходил с листа целиком.
+    (re.compile(r"^[XYZxyz]\s{0,3}[+±-]?\s{0,3}\d+"), ROLE_COORDINATE,
      "координата привязки"),
-    (re.compile(r"^[ОOoККk]\s*\d+"), ROLE_SUPPORT, "опорный знак"),
+    (re.compile(r"^[ОOoККk]\s{0,3}\d+"), ROLE_SUPPORT, "опорный знак"),
     (re.compile(r"^\d+\s*/\s*\d+$"), ROLE_SUPPORT, "опорный знак «N/M»"),
     (re.compile(r"^[Сс][Мм]\.?\s*\d"), ROLE_COORDINATE,
      "привязка к другому листу"),
     (re.compile(r"^\d{2,4}[_-]\d{2,3}[_-]\w+"), ROLE_SPEC, "номер чертежа"),
-    (re.compile(r"^[Dd][Nn]\s*\d"), ROLE_SPEC, "обозначение трубы DN"),
+    # «DN50X50» — обозначение трубы с размерами, без пробела между буквами и
+    # числом. Прежнее правило требовало пробел и такой блок не узнавало.
+    (re.compile(r"^[Dd][Nn]\s{0,3}\d+\s{0,3}[XxХх]\s{0,3}\d+"), ROLE_SPEC,
+     "обозначение трубы DN с размерами"),
+    (re.compile(r"^[Dd][Nn]\s{0,3}\d"), ROLE_SPEC, "обозначение трубы DN"),
     (re.compile(r"^[SW]{1,2}[_-]?\d", re.IGNORECASE), ROLE_TITLE,
      "обозначение комплекта"),
     (re.compile(r"^Лист\b", re.IGNORECASE), ROLE_TITLE, "номер листа"),
     (re.compile(r"^Страница\b", re.IGNORECASE), ROLE_TITLE, "штамп"),
+    # Словесный шум без цифр. Без этих правил он уходил с листа целиком: отбор
+    # идёт по элементам с цифрами, а в «ТЕСТОВОЕ ЗАДАНИЕ», «N» и «НПЕ» их нет.
+    # Роль ROLE_OTHER — единственная из не-размерных, что означает «вырезать».
+    (re.compile(r"ТЕСТОВОЕ\s*ЗАДАНИЕ", re.IGNORECASE), ROLE_OTHER,
+     "водяной знак комплекта"),
+    (re.compile(r"^[Рр][Вв][Бб][Лл]\b"), ROLE_SUPPORT, "опорный знак РВБЛ"),
+    (re.compile(r"^[Нн][Ии][Пп][Ее]\b"), ROLE_OTHER, "текстовый знак НПЕ"),
+    # Стрелка севера и служебные буквы у её основания: без цифр и без рамки.
+    (re.compile(r"^[Сс]\.?$"), ROLE_OTHER, "буква при стрелке севера"),
+    (re.compile(r"^[Nn]$"), ROLE_OTHER, "буква при стрелке севера"),
+    # Привязка к другому листу без номера следом: «СМ.» стоит отдельной
+    # строкой над блоком, и в склеенном элементе цифры за ним может не быть.
+    (re.compile(r"^[Сс][Мм]\.?\s*$"), ROLE_COORDINATE, "привязка к другому листу"),
+    (re.compile(r"ПОДКЛЮЧЕНИЕ", re.IGNORECASE), ROLE_OTHER,
+     "словесная примечание на листе"),
+    (re.compile(r"^[A-Za-zА-Яа-я]{1,3}-[\d/]+$"), ROLE_OTHER,
+     "обозначение точки подключения"),
+    (re.compile(r"^\d+\s*mm\b", re.IGNORECASE), ROLE_SPEC,
+     "диаметр в миллиметрах"),
     (re.compile(r"^(Н\.)?[ОOo]\.?\s*[А-Яа-яA-Za-z]"), ROLE_OTHER,
      "текстовый знак"),
     (re.compile(r"^[ОДНОДНА]{1,2}\s*$", re.IGNORECASE), ROLE_OTHER,
@@ -289,28 +316,43 @@ def assign_roles(
 ) -> list[Element]:
     """Проставить роли элементам.
 
-    Элементы с буквами получают роль по регулярке. Голые числа — по решению
-    разбора: подходит рамка подписи размера (с допуском на доли пункта,
-    которыми рамка подписи и рамка элемента расходятся всегда).
+    Логика от обратного: **размер — это то, что разбор назвал размером, всё
+    остальное вырезается**. Регулярка не решает, что оставить, — она только
+    объясняет в отчёте, что именно было вырезано.
+
+    Признак один, и он абсолютный: рамка элемента совпала с рамкой подписи
+    размера из разбора. Совпадение точное — на десяти листах 115 подписей
+    размеров и 115 совпадений, ни одного размера без своего элемента и ни
+    одного элемента-размера лишнего. Проверка на повторяющихся текстах
+    показала, что это работает и там, где по тексту не различить: четыре
+    подписи «159» на листе 4 разошлись с размерами #3, #9, #16, #17 рамка к
+    рамке, хотя расстояния до линий различаются меньше чем на пункт.
+
+    Раньше роль по умолчанию была «прочее» = не трогать, и с листа уходило
+    188 чужих подписей. Обратная логика пробовалась и с обоснованием, что рамки
+    «расходятся на доли пункта всегда»; на деле расходятся, но не с тем
+    элементом: сравнение шло со списком целиком, а не с нужной подписью.
     """
     out: list[Element] = []
     for element in elements:
+        box = tuple(round(v, 1) for v in element.rect)
+        accepted = any(
+            abs(box[0] - ref[0]) <= slack and abs(box[1] - ref[1]) <= slack
+            and abs(box[2] - ref[2]) <= slack and abs(box[3] - ref[3]) <= slack
+            for ref in accepted_boxes
+        )
         verdict = role_of_text(element.text)
-        if verdict is None:
-            box = tuple(round(v, 1) for v in element.rect)
-            accepted = any(
-                abs(box[0] - ref[0]) <= slack and abs(box[1] - ref[1]) <= slack
-                and abs(box[2] - ref[2]) <= slack and abs(box[3] - ref[3]) <= slack
-                for ref in accepted_boxes
-            )
-            role, reason = role_of_number(accepted)
+        if accepted:
+            role, reason = ROLE_DIMENSION, "разбор нашёл для него размерную линию"
+        elif verdict is not None:
+            role, reason = verdict[0], verdict[1]
         else:
-            role, reason = verdict
+            role, reason = ROLE_OTHER, "разбор не нашёл для него размерной линии"
         out.append(
             Element(
                 mark=element.mark, text=element.text, rect=element.rect,
                 crop=element.crop, image=element.image,
-                accepted=role == ROLE_DIMENSION, role=role, reason=reason,
+                accepted=accepted, role=role, reason=reason,
             )
         )
     return out

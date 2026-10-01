@@ -28,12 +28,16 @@ from typing import Iterable, Sequence
 
 import pymupdf
 
-# Области слегка расширяются: подпись в PDF и нарисованная рамка знака
-# расходятся на доли пункта, и по узкой рамке остаётся обрезок буквы.
-TOUCH = 1.2
 # На столько расширяется прямоугольник вырезания, чтобы в него целиком
 # поместилась рамка знака: она нарисована на пару пунктов шире подписи.
 FRAME_PAD = 2.4
+# Запас, с которым проверяется, не задевает ли прямоугольник размер. Раньше он
+# стоял 1.2 пункта поверх ``FRAME_PAD``, и на десяти листах из-за него
+# пощажены были 33 элемента — при том, что ни один размер при вырезании не
+# пострадал: режим ``REMOVE_IF_COVERED`` сносит только то, что целиком лежит в
+# прямоугольнике, а линия, проходящая насквозь, уцелевает. Запас был нужен
+# для режима «задетая графика», который больше не используется.
+TOUCH = 0.0
 
 
 def _grown(rect: pymupdf.Rect, pad: float) -> pymupdf.Rect:
@@ -257,6 +261,29 @@ def orphaned_leaders(
     return out
 
 
+def _label_free(guard: _Guard, rect: pymupdf.Rect, pad: float = 0.6) -> bool:
+    """Не заденет ли прямоугольник подпись размера.
+
+    Запас остаётся ненулевым в отличие от проверки линий: подпись маленькая, и
+    без запаса вырезание её съедает. На листе 6 подпись `2400` начиналась в
+    0.9 пункта от прямоугольника `О5`, и при фоллбеке без запаса пропала
+    вместе с размером.
+    """
+    grown = _grown(rect, pad)
+    return not any(grown.intersects(label) for label in guard.labels)
+
+
+def _line_crosses(guard: _Guard, rect: pymupdf.Rect, pad: float = 0.6) -> bool:
+    """Пересекает ли прямоугольник размерную линию.
+
+    Режим ``REMOVE_IF_COVERED`` такую линию не сносит, поэтому блокировать её
+    незачем: на десяти листах потеря отрезков размерных линий равна нулю при
+    любом расширении.
+    """
+    grown = _grown(rect, pad)
+    return any(_segment_hits(a, b, grown) for a, b in guard.lines)
+
+
 def redact(
     pdf_page: pymupdf.Page,
     boxes: Sequence[RedactBox],
@@ -279,22 +306,39 @@ def redact(
     guard = guard or _Guard()
     applied: list[RedactBox] = []
     skipped: list[tuple[str, str]] = []
-    wanted: list[RedactBox] = []
+    # Прямоугольник вместе со своим отступом. Отступ у каждого свой: общий
+    # ``pad`` либо ноль, см. фоллбек ниже. Хранить парами обязательно — при
+    # двух отдельных списках ``zip`` сопоставлял прямоугольники не со своими
+    # отступами, и на листе 6 подпись размера `2400` теряла первую цифру.
+    wanted: list[tuple[RedactBox, float]] = []
 
     for box in boxes:
         area = _grown(box.as_rect(), pad)
         reason = guard.blocked(area)
-        if reason is not None:
-            skipped.append((box.mark, reason))
+        if reason is None:
+            wanted.append((box, pad))
             continue
-        wanted.append(box)
+        # Расширение нужно, чтобы накрыть рамку знака: она нарисована шире
+        # текста. Но расширение задевает и размерные линии рядом, и вырезание
+        # блокируется целиком: на листе 1 блок `2 / DN50X50 / X 48300` стоял
+        # в 0.8 пункта от линии размера `320` и оставался со всей разметкой.
+        #
+        # Отсюда фоллбек: тот же прямоугольник без расширения. Текст вырезается
+        # точно, а огрызок рамки знака — несравнимо лучше невырезанного блока:
+        # рамку модель за размер не примет, а число внутри посчитает.
+        narrow_area = box.as_rect()
+        if _label_free(guard, narrow_area) and not _line_crosses(guard,
+                                                                  narrow_area):
+            wanted.append((box, 0.0))
+            continue
+        skipped.append((box.mark, reason))
 
     if not wanted:
         return RedactReport()
 
-    for box in wanted:
-        pdf_page.add_redact_annot(_grown(box.as_rect(), pad))
+    for box, shrink in wanted:
+        pdf_page.add_redact_annot(_grown(box.as_rect(), shrink))
     pdf_page.apply_redactions(graphics=graphics,
                               text=pymupdf.PDF_REDACT_TEXT_REMOVE)
-    applied.extend(wanted)
+    applied.extend(box for box, _ in wanted)
     return RedactReport(tuple(applied), tuple(skipped))

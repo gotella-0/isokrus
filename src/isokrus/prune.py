@@ -41,9 +41,8 @@ from typing import Sequence
 import numpy as np
 import pymupdf
 
-from . import classify
+from . import classify, redact
 from .raster import as_rgb, flush
-from .redact import _segment_hits
 
 # На сколько прямоугольник выреза шире подписи: рамка знака нарисована на
 # пару пунктов шире текста внутри неё.
@@ -88,7 +87,7 @@ def _keep_geometry(scan) -> tuple[tuple[tuple[float, float], tuple[float, float]
     return tuple(out)
 
 
-def build_plan(pdf_page: pymupdf.Page, scan, only_digits: bool = True) -> Plan:
+def build_plan(pdf_page: pymupdf.Page, scan, only_digits: bool = False) -> Plan:
     """План удаления по ролям, назначенным регуляркой и разбором.
 
     Прямоугольник подписи расширяется до рамки, в которую она попала: рамка
@@ -121,57 +120,34 @@ def build_plan(pdf_page: pymupdf.Page, scan, only_digits: bool = True) -> Plan:
     return Plan(
         page_number=pdf_page.number + 1,
         text=tuple(texts), texts=tuple(names),
-        lines=tuple(_removable_lines(pdf_page, scan, texts)),
+        lines=tuple(removable_frames(pdf_page, scan, texts)),
         keep=_keep_geometry(scan),
     )
 
 
-def _touches_keep(rect: pymupdf.Rect, keep: Sequence[tuple], pad: float = 0.6) -> bool:
-    """Проходит ли через прямоугольник хоть одна размерная линия."""
-    grown = pymupdf.Rect(rect.x0 - pad, rect.y0 - pad,
-                         rect.x1 + pad, rect.y1 + pad)
-    return any(_segment_hits(pymupdf.Point(a), pymupdf.Point(b), grown)
-               for a, b in keep)
-
-
-def _removable_lines(
+def removable_frames(
     pdf_page: pymupdf.Page, scan, texts: Sequence[tuple[float, ...]],
 ) -> list[tuple[float, float, float, float]]:
-    """Графика под закрашивание: рамки знаков и выноски без подписи.
+    """Рамки знаков, в которые попала удаляемая подпись.
 
-    Рамка — контур, в который попала удаляемая подпись. Выноска — тонкий
-    отрезок, упирающийся в удаляемую рамку; если отрезок совпадает с
-    размерной линией, закрашивать его нельзя, и он отбрасывается.
+    Только рамки. Выноски и стрелки — отдельный вопрос, и они пока не
+    трогаются: обрезать их до того, как известно, чьи они, нельзя, а
+    закрашивать все подряд — значит стереть половину размерных линий.
     """
-    from .clean import _segments  # локально: clean -> prune
-
-    keep = _keep_geometry(scan)
     boxes = [pymupdf.Rect(t) for t in texts]
     out: list[tuple[float, float, float, float]] = []
     seen: set[tuple[int, int, int, int]] = set()
 
-    def add(rect: pymupdf.Rect) -> None:
-        key = tuple(int(v) for v in rect)
-        if key in seen or _touches_keep(rect, keep):
-            return
-        seen.add(key)
-        out.append(tuple(rect))
-
     for contour in scan.contours:
         frame = pymupdf.Rect(contour.rect)
+        key = tuple(int(v) for v in frame)
+        if key in seen:
+            continue
         grown = pymupdf.Rect(frame.x0 - 1, frame.y0 - 1,
                              frame.x1 + 1, frame.y1 + 1)
         if any(grown.contains(box) for box in boxes):
-            add(frame)
-
-    for a, b in _segments(pdf_page.get_drawings(), scan.limits):
-        pa, pb = pymupdf.Point(a), pymupdf.Point(b)
-        if abs(pa.x - pb.x) + abs(pa.y - pb.y) < 3.0:
-            continue
-        span = pymupdf.Rect(pa, pb)
-        if not any(box.contains(pa) or box.contains(pb) for box in boxes):
-            continue
-        add(span)
+            seen.add(key)
+            out.append(tuple(frame))
 
     return out
 
@@ -316,16 +292,39 @@ def paint(
     return painted
 
 
-def redact_page(pdf_page: pymupdf.Page, plan: Plan) -> int:
-    """Вырезать подписи из содержимого страницы.
+def apply_plan(
+    pdf_page: pymupdf.Page,
+    plan: Plan,
+    guard: "redact._Guard | None" = None,
+    pad: float = FRAME_PAD,
+) -> "redact.RedactReport":
+    """Вырезать подписи и рамки знаков из содержимого страницы.
 
-    Только текст. Графика закрашивается на снимке, и вырезать её из PDF не
-    нужно: вырезание не различает, чья это линия, и уносит вместе с нужной.
+    Режим графики — ``REMOVE_IF_COVERED``. Он сносит только то, что целиком
+    лежит в прямоугольнике, поэтому размерная линия, пересекающая прямоугольник
+    насквозь, остаётся: проверено на всех десяти листах при расширении от 0 до
+    3.6 пункта — исчезло ноль отрезков из 115 размерных линий. Режим «задетая
+    графика» уносил бы и их, вместе с наконечниками.
 
-    Все подписи вырезаются **одним** вызовом. Это требование PyMuPDF, а не
-    аккуратность: после ``apply_redactions`` страница переписывается, и
-    следующий вызов по той же странице текст уже не находит.
+    Все прямоугольники применяются **одним** вызовом. Это требование PyMuPDF, а
+    не аккуратность: после ``apply_redactions`` страница переписывается, и
+    следующий вызов по той же странице графику уже не трогает.
     """
+    boxes: list[redact.RedactBox] = [
+        redact.RedactBox(rect=rect, mark=f"T{index}",
+                         reason=plan.texts[index] if index < len(plan.texts)
+                         else "")
+        for index, rect in enumerate(plan.text)
+    ]
+    boxes += [
+        redact.RedactBox(rect=rect, mark=f"F{index}", reason="рамка знака")
+        for index, rect in enumerate(plan.lines)
+    ]
+    return redact.redact(pdf_page, boxes, guard, pad=pad)
+
+
+def redact_page(pdf_page: pymupdf.Page, plan: Plan) -> int:
+    """Вырезать из страницы только подписи, графику не трогая."""
     if not plan.text:
         return 0
     for rect in plan.text:
