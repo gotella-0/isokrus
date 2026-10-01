@@ -1,0 +1,19 @@
+# Исходники в репозитории лежат с LF, а рабочая копия на Windows тянет CRLF.
+# Без этого каждое касание файла даёт предупреждение и всю историю переписывает
+# при смене настроек у другого человека.
+* text=auto
+
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+
+# Двоичные: правило text=auto их не трогает, но перечисление делает намерение
+# явным — иначе при смене core.autocrlf они распадутся на строки.
+*.pdf binary
+*.docx binary
+*.png binary
+*.jpg binary
