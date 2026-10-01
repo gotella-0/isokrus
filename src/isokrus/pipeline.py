@@ -199,13 +199,19 @@ def run(
     progress: ProgressHook | None = None,
     trim_margins: bool | None = None,
     with_dimensions: bool | None = None,
+    with_overlay: bool | None = None,
+    with_labels: bool | None = None,
     with_clean: bool | None = None,
 ) -> RunResult:
     """Полный цикл: извлечь страницы в память, обработать параллельно, сохранить.
 
     Порядок извлечения задан в :mod:`.extract` и не переставляется здесь:
-    PDF -> разбор размеров по вектору -> рендер -> обрезка -> подписи ->
-    зачистка снимка.
+    PDF -> разбор размеров по вектору -> вырезание шума -> рендер -> обрезка ->
+    подписи -> метки или подсветка размеров.
+
+    ``with_overlay`` и ``with_labels`` раньше сюда не доходили: флаги читались в
+    ``cli``, но в :func:`extract_pages` не передавались, и подсветка молча не
+    включалась ни в одном прогоне. Теперь оба доходят.
     """
     started = _now()
 
@@ -215,6 +221,8 @@ def run(
         pages=pages,
         trim_margins=trim_margins,
         with_dimensions=with_dimensions,
+        with_overlay=with_overlay,
+        with_labels=with_labels,
         with_clean=with_clean,
     )
     if not extraction.pages:

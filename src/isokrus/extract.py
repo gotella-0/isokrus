@@ -34,7 +34,7 @@ import pymupdf
 from . import config
 from .dimscan import DimensionMark, DimParams, detect_page, marks_in_pixels
 from .errors import ExtractionError
-from .overlay import render_overlay
+from .overlay import MODE_FULL, MODE_LABELS, MODE_OFF, render_overlay
 from .prune import apply_plan, build_plan
 from .redact import guard_of
 from .textmap import TextItem, box_to_pixels, extract_text_items, inside_box, shifted_matrix
@@ -244,6 +244,7 @@ def extract_pages(
     with_dimensions: bool | None = None,
     dim_min_length: float | None = None,
     with_overlay: bool | None = None,
+    with_labels: bool | None = None,
     with_clean: bool | None = None,
     clean_filters: Sequence[str] | None = None,
 ) -> ExtractionResult:
@@ -284,6 +285,20 @@ def extract_pages(
     want_trim = config.TRIM_MARGINS if trim_margins is None else trim_margins
     want_dims = config.USE_DIMSCAN if with_dimensions is None else with_dimensions
     want_overlay = config.DIMSCAN_OVERLAY if with_overlay is None else with_overlay
+    # Режим подсветки: полная, только метки или ничего. Метки запрашиваются
+    # отдельным флагом и полной подсветки не выключают — иначе пришлось бы
+    # выбирать между «модель видит номера» и «модель видит подсвеченные линии»,
+    # а нужно и то и другое по отдельности.
+    if with_labels is None:
+        want_labels = config.DIMSCAN_LABELS
+    else:
+        want_labels = with_labels
+    if want_overlay:
+        overlay_mode = MODE_FULL
+    elif want_labels:
+        overlay_mode = MODE_LABELS
+    else:
+        overlay_mode = MODE_OFF
     # Зачистка без разбора размеров бессмысленна: она закрашивает то, что
     # разбор отверг, а отвергать нечем. Молча выключаем, а не падаем.
     want_clean = (config.DIMSCAN_CLEAN if with_clean is None else with_clean) \
@@ -445,10 +460,15 @@ def extract_pages(
             # Шаг 7: подсветка размеров поверх зачистки. Иначе подсветка
             # вернула бы на лист ровно то, что зачистка только что убрала, а
             # наконечники и метки P7 лежат поверх того, что осталось.
-            if dims and want_overlay:
+            #
+            # Режим ``MODE_LABELS`` рисует только метки: модель тогда видит на
+            # листе, какому нарисованному числу какая строка блока разбора
+            # соответствует. Без меток вопрос «что такое P3» на листе с
+            # четырьмя одинаковыми числами не имеет ответа по картинке.
+            if dims and overlay_mode:
                 try:
                     overlay_bytes = render_overlay(
-                        data, width, height, dims
+                        data, width, height, dims, mode=overlay_mode
                     )
                 except Exception as exc:  # подсветка — улучшение, не условие
                     overlay_error = f"{type(exc).__name__}: {exc}"

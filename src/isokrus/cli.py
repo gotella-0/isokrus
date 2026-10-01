@@ -108,6 +108,10 @@ def _summarize(run_result, created: dict) -> None:
         print(f"  в модель: {len(sent)} файл(ов) в {run_result.output_dir / 'to_llm_imgs'}")
 
 
+def _yesno(value: bool) -> str:
+    return "да" if value else "нет"
+
+
 def _dims(args) -> list:
     """Извлечь страницы с разбором размеров и вернуть результат."""
     return extract_pages(
@@ -117,6 +121,7 @@ def _dims(args) -> list:
         trim_margins=not args.no_trim,
         with_dimensions=not args.no_dimscan,
         with_overlay=getattr(args, "overlay", False) or None,
+        with_labels=getattr(args, "labels", False) or None,
         with_clean=_clean_flag(args),
     )
 
@@ -161,6 +166,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"  параллельность: {args.parallel}")
     print(f"  обрезка полей: {'да' if trim_margins else 'нет'}")
     print(f"  разбор размеров: {'да' if want_dims else 'нет'}")
+    print(f"  зачистка листа: {_yesno(_clean_flag(args))}")
+    print(f"  подсветка размеров: {_yesno(getattr(args, 'overlay', False))}")
+    print(f"  метки размеров: {_yesno(getattr(args, 'labels', False))}")
 
     print(f"Извлекаю страницы из {args.pdf} ...")
     print(f"Обрабатываю (до {args.parallel} параллельных вызовов):")
@@ -176,6 +184,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         progress=None if args.quiet else _progress,
         trim_margins=trim_margins,
         with_dimensions=want_dims,
+        with_overlay=getattr(args, "overlay", False) or None,
+        with_labels=getattr(args, "labels", False) or None,
         with_clean=_clean_flag(args),
     )
 
@@ -391,6 +401,13 @@ def build_parser() -> argparse.ArgumentParser:
             help="пометить на листе найденные размеры и отправить в модель "
                  "подсвеченный снимок (по умолчанию выключено: точность "
                  "с подсветкой ниже, см. README)",
+        )
+        sub.add_argument(
+            "--labels", action="store_true",
+            help="подписать на листе номера размеров (P7) и отправить в модель "
+                 "такой снимок. Чертёж не меняется, в отличие от --overlay; "
+                 "без меток модель не может отличить P7 от P13, если значения "
+                 "на листе совпадают (по умолчанию выключено)",
         )
         sub.add_argument(
             "--clean", action="store_true",

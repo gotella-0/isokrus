@@ -394,13 +394,30 @@ def _is_child_role(key: str) -> bool:
     return any(name in key for name in ("child", "segment", "part", "section", "участок"))
 
 
-def collect_candidates(response: dict | None) -> list[tuple[float, str]]:
-    """Все числа ответа в порядке появления + роль каждого.
+def _is_excluded_context(context: str) -> bool:
+    """Число лежит в списке исключений ответа, а не во взятых.
+
+    Имена полей у экспериментов разные (``excluded``, ``dropped``, ``skipped``),
+    поэтому ищем по подстроке, как в :func:`_is_parent_role`.
+    """
+    key = context.lower()
+    return any(
+        name in key for name in ("exclud", "drop", "skipp", "not_counted", "nested")
+    )
+
+
+def collect_candidates(response: dict | None) -> list[tuple[float, str, str | None]]:
+    """Все числа ответа в порядке появления, роль каждого и его метка.
 
     Порядок важен: повторяющиеся размеры («6000» на листе встречается четыре
     раза) раздаются подписям по очереди, иначе четыре сегмента попадут в одну
     рамку. Модель перечисляет ветви в порядке чтения чертежа, поэтому этот
     порядок — лучшее из доступных приближений к ходу трассы.
+
+    Метка (``P8``) нужна, чтобы подписать рамку ею, а не порядковым номером:
+    ответ по меткам содержит чисел нет вовсе, и без метки на разметке не видно,
+    что модель сочла участком, а что выбросила. В ответах без меток остаётся
+    ``None``, и рамка подписывается номером, как раньше.
 
     Числа внутри объектов-сегментов уже собраны обходом ``_walk`` (он входит
     в любой вложенный dict), поэтому массовые массивы обрабатываются здесь
@@ -409,22 +426,42 @@ def collect_candidates(response: dict | None) -> list[tuple[float, str]]:
     if not isinstance(response, dict):
         return []
 
-    found: list[tuple[float, str]] = []
+    found: list[tuple[float, str, str | None]] = []
 
-    def add(value: float, role: str) -> None:
+    def add(value: float, role: str, mark: str | None = None) -> None:
         if abs(value) > 1e-9:
-            found.append((value, role))
+            found.append((value, role, mark))
+
+    def mark_of(node: dict) -> str | None:
+        """Метка размера рядом с числом: ``mark``/``line_id``/``index``."""
+        for key in ("mark", "line_id", "dimension_mark"):
+            value = node.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     for node, context in _walk(response):
         if any(name in context.lower() for name in SKIP_CONTEXTS):
             continue  # блок самопроверки: арифметика модели, не чертёж
 
+        # Метка берётся из узла целиком: у сегмента она лежит рядом с числом
+        # в том же объекте, а не в отдельном поле ответа.
+        mark = mark_of(node)
+
+        # Роль целиком из того поля ответа, где число лежит. Число из
+        # ``excluded`` — это размер, который модель выбросила, и рисовать его
+        # тем же цветом, что взятый, незачем: ради различия и делается разметка.
+        excluded = _is_excluded_context(context)
+        role = "excluded" if excluded else ""
+
         # 1) Скалярные числа узла: length_mm, value, parent_length, ...
         for key, value in _numbers_of(node):
-            if _is_parent_role(key):
-                add(value, "parent")
+            if excluded:
+                add(value, "excluded", mark)
+            elif _is_parent_role(key):
+                add(value, "parent", mark)
             else:
-                add(value, "child")
+                add(value, "child", mark)
 
         # 2) Плоские массивы сегментов: child_segments: [6000, 6000, 4100]
         for key, value in node.items():
@@ -435,7 +472,7 @@ def collect_candidates(response: dict | None) -> list[tuple[float, str]]:
             for item in value:
                 if isinstance(item, bool) or not isinstance(item, (int, float)):
                     continue  # объекты-сегменты уже разобраны обходом выше
-                add(float(item), "child")
+                add(float(item), role or "child", mark)
 
     return found
 
@@ -474,6 +511,11 @@ def text_regions(
 
     Возвращает и неразмеченные значения — их полезно показать в легенде:
     значит, модель сослалась на число, которого на листе нет.
+
+    Роль приходит из ответа, а не угадывается по цвету: у ответа по меткам
+    есть ``excluded``, и размер, который модель выбросила, должен на разметке
+    отличаться от взятого. Раньше выброшенные и взятые выглядели одинаково —
+    проверить ответ по картинке было нечем.
     """
     candidates = collect_candidates(response)
     if not candidates:
@@ -482,7 +524,7 @@ def text_regions(
     index = TextIndex(page.text_items)
     if not len(index):
         return Candidates(regions=[], found=0, duplicated=0,
-                          missing=[_fmt(v) for v, _ in candidates])
+                          missing=[_fmt(v) for v, _, _ in candidates])
 
     used: dict[str, set[int]] = {}
     regions: list[Region] = []
@@ -490,7 +532,7 @@ def text_regions(
     duplicates = 0
     hit = 0
 
-    for value, role in candidates:
+    for value, role, mark in candidates:
         located = _locate(index, value, used)
         if located is None:
             missing.append(_fmt(value))
@@ -501,8 +543,10 @@ def text_regions(
         regions.append(
             Region(
                 bbox=_grow(item.bbox, 2.0),
-                label=item.text,
-                color=(color_overrides or {}).get(role, PARENT_COLOR if role == "parent" else CHILD_COLOR),
+                label=mark or item.text,
+                color=(color_overrides or {}).get(
+                    role, COLORS.get(role, DEFAULT_COLOR)
+                ),
                 kind=role,
                 origin="pdf_text",
             )
@@ -694,17 +738,25 @@ def _chip(
     number: int,
     color: tuple[float, float, float],
     size: float,
+    text: str | None = None,
 ) -> None:
-    """Плашка с номером рамки: связать её глазами с веткой в таблице."""
+    """Плашка на рамке: связать её глазами с веткой в таблице.
+
+    Подписью по умолчанию остаётся порядковый номер — у ответов с числами он
+    и есть идентификатор ветви. Но в ответе по меткам (``P8``) чисел нет вовсе,
+    и порядковый номер не говорит ничего: метка ``P8`` в ответе и на листе одна
+    и та же, поэтому она и подписывает рамку, когда она известна.
+    """
     chip = _place_chip(anchor, size, pdf_page.rect)
     if chip.is_empty:
         return
     pdf_page.draw_rect(chip, color=None, fill=color)
-    text = str(number)
+    caption = text or str(number)
     _draw_text(
         pdf_page,
-        (chip.x0 + (chip.width - _text_width(text, size)) / 2, chip.y1 - size * 0.32),
-        text,
+        (chip.x0 + (chip.width - _text_width(caption, size)) / 2,
+         chip.y1 - size * 0.32),
+        caption,
         size,
         WHITE,
     )
@@ -749,7 +801,10 @@ def _legend(
     pdf_page.draw_rect(box, color=LEGEND_EDGE, fill=LEGEND_BG, width=0.9)
     y = box.y0 + pad + size
     for color, text in lines:
-        swatch = pymupdf.Rect(box.x0 + pad, y - size * 0.8, box.x0 + pad + size * 1.2, y - size * 0.05)
+        swatch = pymupdf.Rect(
+            box.x0 + pad, y - size * 0.8,
+            box.x0 + pad + size * 1.2, y - size * 0.05,
+        )
         pdf_page.draw_rect(swatch, color=None, fill=color)
         _draw_text(pdf_page, (swatch.x1 + size * 0.5, y), _plain(text), size, BLACK)
         y += row
@@ -786,7 +841,7 @@ def annotate_page(
             if rect.is_empty:
                 continue
             pdf_page.draw_rect(rect, color=region.color, width=max(1.5, size * 0.16))
-            _chip(pdf_page, rect, number, region.color, size)
+            _chip(pdf_page, rect, number, region.color, size, region.label)
 
         counts: dict[tuple, int] = {}
         for region in regions:
@@ -796,6 +851,7 @@ def annotate_page(
         for color, name in (
             (PARENT_COLOR, "обобщённая длина (родитель)"),
             (CHILD_COLOR, "дочерний участок"),
+            (COLORS["excluded"], "выброшено моделью"),
             (MODEL_COLOR, "рамка по bbox модели"),
         ):
             if color in counts:
@@ -846,6 +902,8 @@ def _sheet_title(result: "PageResult") -> str:
     stats = annotation_stats(result.page, result.response)
     title = f"Лист {result.page.page_number} · размечено {stats['found']} из {stats['total']}"
     notes: list[str] = []
+    if stats.get("excluded"):
+        notes.append(f"выброшено {stats['excluded']}")
     if stats["duplicated"]:
         notes.append(f"повторов на листе не хватило: {stats['duplicated']}")
     if stats["missing"]:
@@ -856,15 +914,25 @@ def _sheet_title(result: "PageResult") -> str:
 
 
 def annotation_stats(page: PageImage, response: dict | None) -> dict:
-    """Сводка по листу: сколько чисел размечено точным текстом, сколько нет."""
+    """Сводка по листу: сколько чисел размечено точным текстом, сколько нет.
+
+    Ответ приводится к тому же виду, что и при отрисовке. Раньше здесь брался
+    сырой ответ, а в ответе по метках чисел нет вовсе — только ``P7``, — и
+    заголовок писал «размечено 0 из 0» под картинкой с семнадцатью рамками.
+    """
+    resolved = resolve_dimension_indices(response, page)
+    if resolved is not None:
+        response = resolved
     candidates = collect_candidates(response)
     located = text_regions(page, response)
     parents = sum(1 for r in located.regions if r.kind == "parent")
+    dropped = sum(1 for r in located.regions if r.kind == "excluded")
     return {
         "total": len(candidates),
         "found": located.found,
         "parent": parents,
-        "child": len(located.regions) - parents,
+        "child": len(located.regions) - parents - dropped,
+        "excluded": dropped,
         "from_text": sum(1 for r in located.regions if r.origin == "pdf_text"),
         "duplicated": located.duplicated,
         "missing": len(located.missing),
