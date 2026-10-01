@@ -1,0 +1,41 @@
+{
+  "name": "dimension_selection",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "included": {
+        "type": "array",
+        "description": "Метки размеров, длина которых входит в длину трассы. Только метки из блока разбора.",
+        "items": {
+          "type": "string"
+        }
+      },
+      "excluded": {
+        "type": "array",
+        "description": "Размеры, нарисованные на листе, но НЕ входящие в длину трассы: повторно обозначающие тот же участок, либо измеряющие не трубу, а что-то другое.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Метка размера из блока разбора, например P7."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Кратко и по геометрии: на чём стоят засечки этого размера и почему он не длина трассы."
+            }
+          },
+          "required": ["index", "reason"],
+          "additionalProperties": false
+        }
+      },
+      "notes": {
+        "type": "string",
+        "description": "Сомнения, неоднозначности, привязки. Пусто, если всё однозначно."
+      }
+    },
+    "required": ["included", "excluded", "notes"],
+    "additionalProperties": false
+  }
+}
