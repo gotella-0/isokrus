@@ -98,6 +98,26 @@ LLM_RETRY_BACKOFF: float = _env_float("LLM_RETRY_BACKOFF", 2.0)
 LLM_REASONING_EFFORT: str = _env_str("LLM_REASONING_EFFORT", "high")
 LLM_TEMPERATURE: float = _env_float("LLM_TEMPERATURE", 0.0)
 
+# Модели, у которых режим рассуждения включается не через ``effort``.
+#
+# Шлюз один на всех, но тело запроса у моделей разное: ``gpt-6-luna`` и
+# ``glm-5.3-flash`` понимают ``{"reasoning": {"effort": ...}}``, а ``minimax-m3``
+# — ``{"reasoning": {"enabled": true}}``, и ``effort`` там молча игнорируется.
+# Признак — ноль токенов рассуждения в ответе при заданном режиме: модель
+# отвечает, но не размышляет, и прогон выглядит рабочим, а на деле отключает
+# ровно то, ради чего его запускали. Поэтому список задаётся явно, а не
+# угадывается по имени модели.
+REASONING_ENABLED_MODELS: frozenset[str] = frozenset(
+    name.strip().lower()
+    for name in _env_str("LLM_REASONING_ENABLED_MODELS", "minimax-m3").split(",")
+    if name.strip()
+)
+
+
+def uses_reasoning_switch(model: str | None) -> bool:
+    """У этой модели рассуждение включается флагом, а не уровнем."""
+    return (model or LLM_MODEL).strip().lower() in REASONING_ENABLED_MODELS
+
 # Тарифы за 1M токенов — общие, переопределяются env.
 # Токены рассуждения входят в completion_tokens, но тарифицируются отдельно.
 # Кеш тоже: провайдеры OpenAI-совместимого вида включают в prompt_tokens и

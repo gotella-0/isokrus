@@ -5,7 +5,9 @@
     ``strict: true``) — никакого prompt-enforced JSON;
   * сетевые/серверные сбои → повтор ровно того же запроса;
   * ответ получен, но JSON невалиден → повтор с возвратом ошибки модели;
-  * режим размышления по умолчанию ``high`` (через ``extra_body.reasoning``);
+  * режим размышления по умолчанию ``high`` (через ``extra_body.reasoning``;
+    у части моделей вместо уровня передаётся флаг включения — см.
+    ``config.uses_reasoning_switch``);
   * картинка передаётся как base64 в content-части user-сообщения.
 """
 
@@ -368,7 +370,16 @@ def call_structured(
     ]
     messages = base_messages
 
-    extra_body: dict | None = {"reasoning": {"effort": effort}} if effort else None
+    # Тело с режимом рассуждения у разных моделей разное, и расхождение не
+    # бросается в глаза: модель с чужим параметром отвечает как ни в чём не
+    # бывало, просто без рассуждения. Поэтому форма выбирается по модели
+    # (см. ``config.uses_reasoning_switch``), а не одна на всех.
+    if not effort:
+        extra_body: dict | None = None
+    elif config.uses_reasoning_switch(effective_model):
+        extra_body = {"reasoning": {"enabled": True}}
+    else:
+        extra_body = {"reasoning": {"effort": effort}}
     # Strict JSON-контракт один и тот же для всех попыток.
     request_format = {
         "type": "json_schema",
