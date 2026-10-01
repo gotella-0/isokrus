@@ -1,0 +1,45 @@
+{
+  "name": "piping_network_graph",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "branches": {
+        "type": "array",
+        "description": "Список всех магистральных ветвей трассы",
+        "items": {
+          "type": "object",
+          "properties": {
+            "branch_id": {
+              "type": "string",
+              "description": "Идентификатор ветви (например: top_branch, bottom_branch, loop_z)"
+            },
+            "axis": {
+              "type": "string",
+              "description": "Направление ветви в пространства (X, Y или Z)"
+            },
+            "parent_length": {
+              "type": ["number", "null"],
+              "description": "Обобщенная/родительская длина из дельты координат или общего размера. null если отсутствует."
+            },
+            "child_segments": {
+              "type": "array",
+              "description": "Явно проставленные дочерние размеры, лежащие на этой ветке",
+              "items": {
+                "type": "number"
+              }
+            },
+            "notes": {
+              "type": "string",
+              "description": "Краткое примечание по привязкам или нераспределенному остатку"
+            }
+          },
+          "required": ["branch_id", "axis", "parent_length", "child_segments", "notes"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["branches"],
+    "additionalProperties": false
+  }
+}

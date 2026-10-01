@@ -1,0 +1,133 @@
+{
+  "title": "IsometricSheetAnalysis",
+  "description": "Разбор одного листа изометрического чертежа трубопровода с разбивкой трассы на участки.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sheet_number",
+    "line_designation",
+    "segments",
+    "total_length_mm",
+    "formula",
+    "status",
+    "notes"
+  ],
+  "properties": {
+    "sheet_number": {
+      "type": "string",
+      "description": "Номер листа как на чертеже: «Лист 1 из 10» -> \"1\". Если номер не читается — \"\"."
+    },
+    "line_designation": {
+      "type": "string",
+      "description": "Обозначение трассы/линии, например SW_1002 или ссылка «СМ. 4137_14-003-SW-1001 B1B11». Если нет — \"\"."
+    },
+    "scale_note": {
+      "type": "string",
+      "description": "Пропорциональный масштаб, если на листе есть масштабная линейка или примечание. Иначе \"\"."
+    },
+    "segments": {
+      "type": "array",
+      "description": "Все линейные размеры трассы и ответвлений. Каждый размер — отдельный элемент.",
+      "items": { "$ref": "#/$defs/Segment" }
+    },
+    "excluded_dimensions": {
+      "type": "array",
+      "description": "Размеры, найденные на листе, но сознательно НЕ включённые в расчёт (справочные, привязочные, дублирующие).",
+      "items": { "$ref": "#/$defs/ExcludedDimension" }
+    },
+    "total_length_mm": {
+      "type": "number",
+      "description": "Сумма длин ВСЕХ включённых участков в мм, включая ответвления. Считается как арифметическая сумма полей value_mm элементов segments."
+    },
+    "formula": {
+      "type": "string",
+      "description": "Формула расчёта в человекочитаемом виде с подстановкой чисел, например \"200 + 900 + 2160 + 800 + 320 + 1383 = 5763 мм\"."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "partial", "ambiguous", "unreadable"],
+      "description": "ok — все размеры прочитаны уверенно; partial — часть размеров не прочитана; ambiguous — есть сомнения в трактовке; unreadable — лист не удалось разобрать."
+    },
+    "notes": {
+      "type": "array",
+      "description": "Замечания для проверки инженером. Пустой массив, если всё однозначно.",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "BBox": {
+      "title": "BBox",
+      "description": "Прямоугольник вокруг элемента в нормализованных координатах 0..1000 от левого верхнего угла изображения.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x0", "y0", "x1", "y1"],
+      "properties": {
+        "x0": { "type": "number", "description": "Левая граница, 0..1000." },
+        "y0": { "type": "number", "description": "Верхняя граница, 0..1000." },
+        "x1": { "type": "number", "description": "Правая граница, 0..1000." },
+        "y1": { "type": "number", "description": "Нижняя граница, 0..1000." }
+      }
+    },
+    "Segment": {
+      "title": "Segment",
+      "description": "Один линейный размер вдоль трассы или ответвления.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "value_mm", "kind", "used", "confidence", "bbox"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Размер как напечатан на чертеже, например \"2160\"."
+        },
+        "value_mm": {
+          "type": "number",
+          "description": "Числовое значение размера в мм. Если на чертеже другая единица (м, см) — переведи в мм."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["main", "branch", "vertical", "riser"],
+          "description": "main — основная трасса; branch — ответвление; vertical/riser — вертикальный участок/стойка."
+        },
+        "used": {
+          "type": "boolean",
+          "description": "true, если размер включён в total_length_mm. Все элементы с used=false перечисляются в excluded_dimensions."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"],
+          "description": "Уверенность в прочтении цифр. low означает, что цифры неоднозначны и требуют проверки."
+        },
+        "bbox": {
+          "description": "Прямоугольник вокруг подписи размера. Если не можешь определить — null.",
+          "anyOf": [{ "$ref": "#/$defs/BBox" }, { "type": "null" }]
+        },
+        "comment": {
+          "description": "Пояснение к размеру: что он означает, почему сомневаешься. Пустая строка если всё ясно.",
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        }
+      }
+    },
+    "ExcludedDimension": {
+      "title": "ExcludedDimension",
+      "description": "Размер, найденный на листе, но не включённый в расчёт.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "reason", "bbox"],
+      "properties": {
+        "label": { "type": "string", "description": "Размер как напечатан." },
+        "value_mm": {
+          "description": "Значение в мм, если удалось прочитать.",
+          "anyOf": [{ "type": "number" }, { "type": "null" }]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Почему исключён: справочный, привязочный, дублирует другой размер, относится к смежному листу и т.п."
+        },
+        "bbox": {
+          "description": "Прямоугольник вокруг подписи размера.",
+          "anyOf": [{ "$ref": "#/$defs/BBox" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}

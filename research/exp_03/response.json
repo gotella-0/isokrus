@@ -1,0 +1,118 @@
+{
+  "title": "RouteAnalysis",
+  "description": "exp_03 — трактовка через маршрут: модель сначала описывает путь по точкам привязки (start/end), потом разбивает его на участки, и для каждого даёт размер и контрольную проверку через координаты. Схема проверяема: есть check_value_mm, которое можно сверить с суммой.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sheet_number",
+    "line_designation",
+    "start_point",
+    "end_point",
+    "segments",
+    "total_length_mm",
+    "verification",
+    "status",
+    "issues"
+  ],
+  "properties": {
+    "sheet_number": { "type": "string", "description": "Номер листа цифрами." },
+    "line_designation": { "type": "string", "description": "Обозначение трассы или ссылка «СМ. ...»." },
+    "start_point": { "$ref": "#/$defs/ConnectionPoint", "description": "Откуда начинается обход на этом листе." },
+    "end_point": { "$ref": "#/$defs/ConnectionPoint", "description": "Где обход заканчивается. Если это «СМ. лист N» — опиши как reference_only." },
+    "segments": {
+      "type": "array",
+      "description": "Участки маршрута в порядке обхода. Каждый — ровно один размер с чертежа.",
+      "items": { "$ref": "#/$defs/RouteSegment" }
+    },
+    "total_length_mm": { "type": "number", "description": "Сумма value_mm всех сегментов, мм." },
+    "verification": {
+      "type": "object",
+      "description": "Самопроверка модели. Сумма программно сверяется с total_length_mm.",
+      "additionalProperties": false,
+      "required": ["sum_of_segments_mm", "matches", "comment"],
+      "properties": {
+        "sum_of_segments_mm": { "type": "number", "description": "Сумма value_mm всех сегментов, посчитанная тобой." },
+        "matches": { "type": "boolean", "description": "true, если sum_of_segments_mm == total_length_mm." },
+        "comment": { "type": "string", "description": "Пояснение проверки: что сошлось или что вызвало расхождение." }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "partial", "ambiguous", "unreadable"]
+    },
+    "issues": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Замечания для инженера: неоднозначности, непрочитанные размеры, спорные повторы."
+    }
+  },
+  "$defs": {
+    "ConnectionPoint": {
+      "title": "ConnectionPoint",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "label"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["flange", "weld", "valve", "tee", "reference_only", "unknown"],
+          "description": "Тип точки подключения на этом листе."
+        },
+        "label": { "type": "string", "description": "Обозначение точки как на чертеже." },
+        "coordinates": {
+          "description": "Координаты привязки X/Y/Z из выноски, если они есть.",
+          "anyOf": [{ "$ref": "#/$defs/Coordinates" }, { "type": "null" }]
+        }
+      }
+    },
+    "Coordinates": {
+      "title": "Coordinates",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number", "description": "Координата X в мм." },
+        "y": { "type": "number", "description": "Координата Y в мм." },
+        "z": { "description": "Координата Z (отметка), если указана.", "anyOf": [{ "type": "number" }, { "type": "null" }] }
+      }
+    },
+    "RouteSegment": {
+      "title": "RouteSegment",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "label", "value_mm", "kind", "confidence", "bbox"],
+      "properties": {
+        "index": { "type": "integer", "description": "Порядковый номер участка в маршруте, начиная с 1." },
+        "label": { "type": "string", "description": "Размер как напечатан на чертеже, например \"2160\"." },
+        "value_mm": { "type": "number", "description": "Длина участка в мм со всеми отступами." },
+        "kind": {
+          "type": "string",
+          "enum": ["main", "branch", "vertical", "riser"],
+          "description": "main — трасса, branch — ответвление, vertical/riser — вертикаль."
+        },
+        "repeat_count": {
+          "description": "Для размеров вида «960 + <12>»: сколько раз повторяется отступ 12. null, если повторов нет.",
+          "anyOf": [{ "type": "integer" }, { "type": "null" }]
+        },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+        "bbox": {
+          "description": "Прямоугольник вокруг подписи размера в координатах 0..1000 от левого верхнего угла.",
+          "anyOf": [{ "$ref": "#/$defs/BBox" }, { "type": "null" }]
+        },
+        "comment": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Пояснение к участку." }
+      }
+    },
+    "BBox": {
+      "title": "BBox",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x0", "y0", "x1", "y1"],
+      "properties": {
+        "x0": { "type": "number", "description": "Левая граница 0..1000." },
+        "y0": { "type": "number", "description": "Верхняя граница 0..1000." },
+        "x1": { "type": "number", "description": "Правая граница 0..1000." },
+        "y1": { "type": "number", "description": "Нижняя граница 0..1000." }
+      }
+    }
+  }
+}

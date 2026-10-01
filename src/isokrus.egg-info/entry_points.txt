@@ -1,0 +1,2 @@
+[console_scripts]
+isokrus = isokrus.cli:main

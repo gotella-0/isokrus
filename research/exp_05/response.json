@@ -1,0 +1,41 @@
+{
+  "name": "dimension_selection",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "included": {
+        "type": "array",
+        "description": "Метки размеров, которые входят в длину трассы. Только метки из блока разбора.",
+        "items": {
+          "type": "string"
+        }
+      },
+      "excluded": {
+        "type": "array",
+        "description": "Размеры, нарисованные на листе, но НЕ входящие в длину трассы (вложенные в другой размер, повторно обозначающие тот же участок).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Метка размера из блока разбора, например P7."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Кратко: вложен в какой размер или почему не считается."
+            }
+          },
+          "required": ["index", "reason"],
+          "additionalProperties": false
+        }
+      },
+      "notes": {
+        "type": "string",
+        "description": "Сомнения, неоднозначности, привязки. Пусто, если всё однозначно."
+      }
+    },
+    "required": ["included", "excluded", "notes"],
+    "additionalProperties": false
+  }
+}

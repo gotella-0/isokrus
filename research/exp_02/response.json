@@ -1,0 +1,52 @@
+{
+  "title": "LeanSheetAnalysis",
+  "description": "exp_02 — облегчённая версия. Плоский список чисел без bbox и без excluded_dimensions: минимум токенов, максимум скорости. Нужна, чтобы сравнить качество/стоимость с exp_01 на тех же листах.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sheet_number",
+    "line_designation",
+    "dimensions",
+    "total_length_mm",
+    "status",
+    "issues"
+  ],
+  "properties": {
+    "sheet_number": {
+      "type": "string",
+      "description": "Номер листа цифрами, например \"1\"."
+    },
+    "line_designation": {
+      "type": "string",
+      "description": "Обозначение трассы (SW_1002) или ссылка «СМ. ...». Если нет — \"\"."
+    },
+    "dimensions": {
+      "type": "array",
+      "description": "Все линейные размеры трассы и ответвлений, плоским списком, в порядке обхода.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value_mm", "is_branch"],
+        "properties": {
+          "value_mm": { "type": "number", "description": "Длина участка в мм." },
+          "is_branch": { "type": "boolean", "description": "true, если это ответвление, false — основная трасса." },
+          "is_vertical": { "type": "boolean", "description": "true, если участок вертикальный." },
+          "sure": { "type": "boolean", "description": "false, если цифры прочитаны неуверенно." }
+        }
+      }
+    },
+    "total_length_mm": {
+      "type": "number",
+      "description": "Сумма value_mm всех элементов dimensions в мм."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "partial", "ambiguous", "unreadable"]
+    },
+    "issues": {
+      "type": "array",
+      "description": "Короткие замечания о спорных местах. Пусто, если всё ясно.",
+      "items": { "type": "string" }
+    }
+  }
+}
