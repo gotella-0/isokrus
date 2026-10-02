@@ -4,7 +4,7 @@
 
     research/
       exp_01/
-        meta.json        # опционально: model, reasoning_effort, temperature, описание
+        meta.json        # опционально: model, reasoning_effort, описание
         system.md        # системный промт
         user.md          # опционально: текст пользовательской инструкции
         response.json    # JSON Schema ответа (конвертируется в pydantic-модель)
@@ -92,7 +92,6 @@ class Experiment:
     user: str | None = None
     model: str | None = None
     reasoning_effort: str | None = None
-    temperature: float | None = None
     notes: str = ""
     files: list[str] = field(default_factory=list)
     use_pdf_text: bool = True  # подставлять извлечённый текст в system.md
@@ -152,7 +151,6 @@ class Experiment:
             f"папка:      {self.path}",
             f"модель:     {self.model or config.LLM_MODEL}",
             f"reasoning:  {self.reasoning_effort or config.LLM_REASONING_EFFORT}",
-            f"температура:{(' ' + str(self.temperature)) if self.temperature is not None else ' default'}",
             f"текст PDF:  {'подставляется в промт' if self.use_pdf_text else 'выключен'}",
             f"размеры:    {'подставляются в промт' if self.use_dimensions else 'выключен'}",
             f"поля ответа:{', '.join(self.response_model.model_fields)}",
@@ -251,7 +249,6 @@ def load_experiment(name_or_path: str | Path) -> Experiment:
         user=user,
         model=meta.get("model") or meta.get("llm_model"),
         reasoning_effort=meta.get("reasoning_effort") or meta.get("reasoning"),
-        temperature=meta.get("temperature"),
         notes=str(meta.get("description") or meta.get("notes") or ""),
         files=sorted(f.name for f in folder.iterdir() if f.is_file()),
         use_pdf_text=bool(meta.get("pdf_text", True)),

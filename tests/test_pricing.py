@@ -22,7 +22,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from isokrus import config
-from isokrus.llm import _cache_tokens, _estimate_cost
+from isokrus.usage import _cache_tokens, _estimate_cost
 
 FAILURES: list[str] = []
 

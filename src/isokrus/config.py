@@ -95,8 +95,10 @@ LLM_MAX_RETRIES: int = _env_int("LLM_MAX_RETRIES", 3)
 LLM_RETRY_BACKOFF: float = _env_float("LLM_RETRY_BACKOFF", 2.0)
 
 # По умолчанию модель всегда работает в режиме глубокого размышления.
+# Параметр ``temperature`` не задаётся вовсе: провайдер применяет свой
+# дефолт, а вариант с передачей нуля был убран — он объявлялся в meta.json
+# экспериментов, но до API никогда не доходил.
 LLM_REASONING_EFFORT: str = _env_str("LLM_REASONING_EFFORT", "high")
-LLM_TEMPERATURE: float = _env_float("LLM_TEMPERATURE", 0.0)
 
 # Модели, у которых режим рассуждения включается не через ``effort``.
 #
