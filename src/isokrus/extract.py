@@ -80,6 +80,17 @@ class PageImage:
     meta: dict = field(default_factory=dict, compare=False, repr=False)
 
     @property
+    def full_data(self) -> bytes:
+        """Байты полного (не обрезанного) рендера страницы.
+
+        Совпадает с ``data``, когда обрезки не было. Нужен разметке
+        (``annotate.py``): она рисует на исходном листе, а не на срезе,
+        чтобы чертёж смотрелся в контексте полей, как на бумаге.
+        """
+        stored = self.meta.get("full_png")
+        return stored if isinstance(stored, bytes) and stored else self.data
+
+    @property
     def name(self) -> str:
         return self.label or f"page_{self.page_number:02d}.png"
 
@@ -377,6 +388,7 @@ def extract_pages(
             # Шаг 2: обрезка пустых полей. Рамка ищется по нарисованным
             # пикселям, поэтому на диск и в модель уходит обрезанный лист.
             trimmed = trim(pixmap) if want_trim else None
+            full_pixmap = pixmap  # полный рендер, живёт до конца итерации
             if trimmed is not None and not trimmed.skipped:
                 pixmap = trimmed.pixmap
             trim_info = trimmed.as_dict() if trimmed is not None else None
@@ -386,6 +398,18 @@ def extract_pages(
             # обработки не создаётся.
             data = pixmap.tobytes("png")
             width, height = pixmap.width, pixmap.height
+
+            # Полный (не обрезанный) рендер — для разметки: она кладётся
+            # на исходный лист, а не на срез, чтобы чертёж смотрелся в
+            # контексте полей, как на бумаге. Копия снимка делается до
+            # переприсвоения: ``pixmap`` заменяется обрезанным, и освободить
+            # оригинал после цикла было бы нельзя — полные байты на него
+            # смотрят. Хранится в meta; когда обрезки не было, это ``data``.
+            if trimmed is not None and not trimmed.skipped:
+                full_data = full_pixmap.tobytes("png")
+                full_pixmap = None
+            else:
+                full_data = data
 
             # Матрица в координатах обрезанной картинки. Её используют и
             # подписи, и размеры: одна матрица на обе части листа, поэтому
@@ -487,6 +511,7 @@ def extract_pages(
                         "overlay": bool(overlay_bytes),
                         "overlay_error": overlay_error,
                         "trim": trim_info,
+                        "full_png": full_data,
                     },
                 )
             )

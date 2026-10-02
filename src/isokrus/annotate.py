@@ -405,7 +405,7 @@ def collect_candidates(response: dict | None) -> list[tuple[float, str, str | No
 
     Метка (``P8``) нужна, чтобы подписать рамку ею, а не порядковым номером:
     ответ по меткам содержит чисел нет вовсе, и без метки на разметке не видно,
-    что модель сочла участком, а что выбросила. В ответах без меток остаётся
+    что модель сочла участком, а что исключила из расчёта. В ответах без меток остаётся
     ``None``, и рамка подписывается номером, как раньше.
 
     Числа внутри объектов-сегментов уже собраны обходом ``_walk`` (он входит
@@ -438,8 +438,9 @@ def collect_candidates(response: dict | None) -> list[tuple[float, str, str | No
         mark = mark_of(node)
 
         # Роль целиком из того поля ответа, где число лежит. Число из
-        # ``excluded`` — это размер, который модель выбросила, и рисовать его
-        # тем же цветом, что взятый, незачем: ради различия и делается разметка.
+        # ``excluded`` — это размер, который модель исключила из расчёта
+        # (обычно как вложенный), и рисовать его тем же цветом, что взятый,
+        # незачем: ради различия и делается разметка.
         excluded = _is_excluded_context(context)
         role = "excluded" if excluded else ""
 
@@ -502,9 +503,9 @@ def text_regions(
     значит, модель сослалась на число, которого на листе нет.
 
     Роль приходит из ответа, а не угадывается по цвету: у ответа по меткам
-    есть ``excluded``, и размер, который модель выбросила, должен на разметке
-    отличаться от взятого. Раньше выброшенные и взятые выглядели одинаково —
-    проверить ответ по картинке было нечем.
+    есть ``excluded``, и размер, который модель исключила из расчёта, должен
+    на разметке отличаться от взятого. Раньше исключённые и взятые выглядели
+    одинаково — проверить ответ по картинке было нечем.
     """
     candidates = collect_candidates(response)
     if not candidates:
@@ -692,7 +693,25 @@ def _plain(text: str) -> str:
 
 
 def _text_size(page: PageImage) -> float:
-    return max(11.0, min(26.0, page.width / 240.0))
+    """Кегль подписей разметки, от ширины листа.
+
+    Берётся ширина полного рендера: разметка рисуется на нём, и кегль
+    должен быть одинаковым независимо от того, насколько срезали полей.
+    """
+    width = _png_size(page.full_data)[0]
+    return max(11.0, min(26.0, width / 240.0))
+
+
+def _png_size(png: bytes) -> tuple[int, int]:
+    """``(ширина, высота)`` PNG из его заголовка (IHDR), без зависимостей.
+
+    Разметка строится на полном рендере, а его размеры не лежат в
+    ``PageImage`` — читать их из заголовка дешевле, чем тащить ещё один
+    экземпляр байтов через конвейер.
+    """
+    if len(png) < 24 or png[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("Ожидался PNG-поток")
+    return int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")
 
 
 def _place_chip(anchor: pymupdf.Rect, size: float, page_rect: pymupdf.Rect) -> pymupdf.Rect:
@@ -809,6 +828,12 @@ def annotate_page(
 ) -> Path:
     """Наложить разметку на изображение листа и сохранить PNG.
 
+    Основой берётся **полный** рендер страницы (``page.full_data``), а не
+    обрезанный: разметка смотрится в контексте полей листа, как на бумаге.
+    Рамки при этом живут в пикселях обрезанной картинки (текстовый слой
+    сдвинут на срез), поэтому на полный лист они переносятся со сдвигом
+    на рамку обрезки.
+
     Изображение встраивается в PDF-страницу размером ровно в пиксели картинки
     (1 pt = 1 px), поэтому координаты подписей из текстового слоя ложатся на
     растр без всякой поправки на масштаб.
@@ -816,13 +841,28 @@ def annotate_page(
     if regions is None:
         regions = collect_regions(response, page, space)
 
+    base = page.full_data
+    # Сдвиг рамок: пиксели обрезанной картинки -> пиксели полного листа.
+    trim_info = page.meta.get("trim")
+    if trim_info and base is not page.data:
+        off_x, off_y = trim_info["box"][0], trim_info["box"][1]
+        regions = [
+            Region(
+                bbox=(r.bbox[0] + off_x, r.bbox[1] + off_y,
+                      r.bbox[2] + off_x, r.bbox[3] + off_y),
+                label=r.label, color=r.color, kind=r.kind, origin=r.origin,
+            )
+            for r in regions
+        ]
+    base_width, base_height = _png_size(base)
+
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
     document = pymupdf.open()
     try:
-        pdf_page = document.new_page(width=page.width, height=page.height)
-        pdf_page.insert_image(pdf_page.rect, stream=page.data)
+        pdf_page = document.new_page(width=base_width, height=base_height)
+        pdf_page.insert_image(pdf_page.rect, stream=base)
 
         size = _text_size(page)
         for number, region in enumerate(regions, start=1):
@@ -840,7 +880,7 @@ def annotate_page(
         for color, name in (
             (PARENT_COLOR, "обобщённая длина (родитель)"),
             (CHILD_COLOR, "дочерний участок"),
-            (COLORS["excluded"], "выброшено моделью"),
+            (COLORS["excluded"], "исключено из расчёта моделью (вложенные)"),
             (MODEL_COLOR, "рамка по bbox модели"),
         ):
             if color in counts:
@@ -892,7 +932,7 @@ def _sheet_title(result: "PageResult") -> str:
     title = f"Лист {result.page.page_number} · размечено {stats['found']} из {stats['total']}"
     notes: list[str] = []
     if stats.get("excluded"):
-        notes.append(f"выброшено {stats['excluded']}")
+        notes.append(f"исключено из расчёта: {stats['excluded']}")
     if stats["duplicated"]:
         notes.append(f"повторов на листе не хватило: {stats['duplicated']}")
     if stats["missing"]:
