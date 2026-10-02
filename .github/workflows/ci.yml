@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install ruff
+
+      - name: Lint (ruff, errors only)
+        run: ruff check src tests --select=E9,F63,F7,F82,F401
+
+      # Ключ API не нужен: тесты работают по вектору PDF, к API не ходят.
+      # Комплект 02_*.pdf закоммичен, поразмерный эталон — в tests/dimscan/reference.py.
+      - name: Unit tests (no API)
+        run: |
+          python tests/test_llm_usage.py
+          python tests/test_pricing.py
+          python tests/test_model_override.py
+          python tests/test_exp05_indices.py
+          python tests/test_unclassified_marks.py
+          python tests/test_dimscan_layout.py
+
+      - name: PDF pipeline tests (no API)
+        run: |
+          python tests/test_trim.py
+          python tests/test_prune.py
+          python tests/test_overlay.py
+          python tests/test_isokrus_dimscan.py
+          python tests/test_dimscan_detect.py
+
+      - name: Reference check
+        run: python check_reference.py
