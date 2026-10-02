@@ -16,3 +16,6 @@ proto/out/
 
 # Артефакт установки пакета (pip install -e)
 *.egg-info/
+
+# Служебные выгрузки разведки dimscan (воспроизводятся tests/dimscan/__main__.py)
+tests/dimscan/out/
