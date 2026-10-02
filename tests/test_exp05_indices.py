@@ -98,7 +98,7 @@ check("не меточный", not looks_indexed(flat))
 check("резолв вернул None", resolve_dimension_indices(flat, page) is None)
 
 print("7. лист без разбора не ломает разметку")
-scanned = extract_pages("03_Пример_расчета_длины.pdf").pages[0]
+scanned = extract_pages(PDF, pages=["9"], with_dimensions=False).pages[0]
 check("разбора нет", not scanned.dimensions)
 check("резолв вернул None",
       resolve_dimension_indices({"included": ["P1"]}, scanned) is None)
