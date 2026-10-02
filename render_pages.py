@@ -7,6 +7,6 @@ matrix = pymupdf.Matrix(zoom, zoom)
 
 for i, page in enumerate(pdf, start=1):
     pix = page.get_pixmap(matrix=matrix, alpha=False)
-    out = f"dataset/list_{i:02d}.png"
+    out = f"reference/list_{i:02d}.png"
     pix.save(out)
     print(out, pix.width, "x", pix.height)
