@@ -110,25 +110,6 @@ def _parent_length(branch: dict) -> Any:
     return None
 
 
-def _child_lengths(branch: dict) -> list[Any]:
-    """Дочерние участки ветви: числа из массива либо из объектов-сегментов."""
-    out: list[Any] = []
-    for key in ("child_segments", "children", "segments", "dimensions", "parts", "items"):
-        value = branch.get(key)
-        if not isinstance(value, list):
-            continue
-        for item in value:
-            if isinstance(item, bool):
-                continue
-            if isinstance(item, (int, float, str)):
-                out.append(_as_number(item))
-            elif isinstance(item, dict):
-                length = _segment_length(item)
-                if length is not None:
-                    out.append(length)
-    return out
-
-
 def _hierarchy_summary(response: dict) -> tuple[list[float], list[str]] | None:
     """Корневые длины ветвей, если ответ построен как иерархия.
 
@@ -463,26 +444,3 @@ def build_stats(run_result: RunResult) -> dict:
                 {"page": result.page.page_number, "error": result.error}
             )
     return stats
-
-
-def write_reports(run_result: RunResult) -> dict[str, Path | None]:
-    """Сформировать все отчёты: CSV, Excel (опционально), статистика."""
-    import json
-
-    from .pipeline import write_json_report
-
-    out = run_result.output_dir
-    rows = build_rows(run_result.pages)
-
-    created: dict[str, Path | None] = {
-        "csv": write_csv(rows, out / CSV_NAME),
-        "xlsx": write_xlsx(rows, out / XLSX_NAME),
-        "stats": out / STATS_NAME,
-        "json": write_json_report(run_result),
-    }
-
-    stats = build_stats(run_result)
-    created["stats"].write_text(
-        json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    return created

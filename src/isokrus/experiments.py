@@ -145,20 +145,6 @@ class Experiment:
             text = _strip_dimensions_section(text)
         return text
 
-    def describe(self) -> str:
-        lines = [
-            f"эксперимент: {self.name}",
-            f"папка:      {self.path}",
-            f"модель:     {self.model or config.LLM_MODEL}",
-            f"reasoning:  {self.reasoning_effort or config.LLM_REASONING_EFFORT}",
-            f"текст PDF:  {'подставляется в промт' if self.use_pdf_text else 'выключен'}",
-            f"размеры:    {'подставляются в промт' if self.use_dimensions else 'выключен'}",
-            f"поля ответа:{', '.join(self.response_model.model_fields)}",
-        ]
-        if self.notes:
-            lines.append(f"заметки:    {self.notes}")
-        return "\n".join(lines)
-
 
 def _first_existing(folder: Path, names: tuple[str, ...]) -> Path | None:
     for name in names:

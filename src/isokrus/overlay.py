@@ -113,21 +113,8 @@ def _draw_arrow(
     )
 
 
-def _intersects(a: pymupdf.Rect, b: pymupdf.Rect, pad: float = 0.0) -> bool:
-    return not (
-        a.x1 + pad < b.x0
-        or a.x0 - pad > b.x1
-        or a.y1 + pad < b.y0
-        or a.y0 - pad > b.y1
-    )
-
-
 def _fits(rect: pymupdf.Rect, width: int, height: int) -> bool:
     return rect.x0 >= 0 and rect.y0 >= 0 and rect.x1 <= width and rect.y1 <= height
-
-
-def _plate(width: float, height: float, x: float, y: float) -> pymupdf.Rect:
-    return pymupdf.Rect(x, y, x + width, y + height)
 
 
 def _badge_rect(

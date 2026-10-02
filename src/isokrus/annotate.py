@@ -366,17 +366,6 @@ def _numbers_of(node: dict) -> Iterator[tuple[str, float]]:
             yield key, float(value)
 
 
-def _looks_numeric(value: str) -> bool:
-    cleaned = value.replace(" ", "").replace(",", ".").replace("x", "").strip()
-    if not cleaned:
-        return False
-    try:
-        float(cleaned)
-    except ValueError:
-        return False
-    return True
-
-
 def _is_parent_role(key: str) -> bool:
     """Обобщённая длина ветви: ``parent_length``, ``total_length_mm``, ...
 
