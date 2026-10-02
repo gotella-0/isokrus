@@ -24,6 +24,7 @@ PDF в пунктах, поэтому обрезка полей на нём не
 
 from __future__ import annotations
 
+import base64
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,10 +74,8 @@ class PageImage:
     # метка P7 и наконечники (см. ``overlay.py``). Уходит в модель вместо
     # исходного PNG. На диск по-прежнему кладётся исходник из ``data``:
     # подсветка нужна модели, а человеку для сверки нужна настоящая выдача.
-    # Лист с закрашенными знаками, координатами привязки и прочим шумом
-    # (см. ``clean.py``). Уходит в модель вместо ``data``; на диск по-прежнему
-    # кладётся исходник: зачистка — улучшение для машины, а не правка чертежа.
-    cleaned: bytes = b""
+    # Зачистка (см. ``prune.py``) применяется к странице до рендера, поэтому
+    # её результат сидит прямо в ``data`` — отдельного поля у неё нет.
     overlay: bytes = b""
     meta: dict = field(default_factory=dict, compare=False, repr=False)
 
@@ -102,20 +101,19 @@ class PageImage:
 
     def base64_image(self) -> str:
         """base64-представление для OpenAI-совместимого API."""
-        import base64
-
         return base64.b64encode(self.model_image()).decode("utf-8")
 
     def model_image(self) -> bytes:
         """Байты изображения, которые уходят в модель.
 
-        Сначала подсвеченный лист, потом зачищенный, иначе исходный. Подмена
+        Сначала подсвеченный лист, иначе исходный (зачистка уже внутри
+        ``data`` — она применяется к странице до рендера). Подмена
         происходит здесь, а не в конвейере, по одной причине: отправить
         обработанный лист и сохранить исходник — две разные вещи, и если бы
         выбор делал конвейер, легко было бы сохранить не то, что ушло в
         модель, а это ломает сверку результата с картинкой.
         """
-        return self.overlay or self.cleaned or self.data
+        return self.overlay or self.data
 
     def data_url(self) -> str:
         """Готовая data:-ссылка для ``image_url``."""
@@ -246,7 +244,6 @@ def extract_pages(
     with_overlay: bool | None = None,
     with_labels: bool | None = None,
     with_clean: bool | None = None,
-    clean_filters: Sequence[str] | None = None,
 ) -> ExtractionResult:
     """Открыть PDF и отрендерить выбранные страницы в памяти.
 
@@ -270,8 +267,6 @@ def extract_pages(
         (по умолчанию ``config.DIMSCAN_CLEAN``). Работает только вместе с
         ``with_dimensions``: зачистка опирается на то, что разбор уже отверг
         эти числа, и без разбора их нечем обосновать.
-    :param clean_filters: какие зачистки применять (по умолчанию
-        ``config.DIMSCAN_CLEAN_FILTERS``).
     """
     path = Path(pdf_path)
     if not path.exists():
@@ -303,10 +298,6 @@ def extract_pages(
     # разбор отверг, а отвергать нечем. Молча выключаем, а не падаем.
     want_clean = (config.DIMSCAN_CLEAN if with_clean is None else with_clean) \
         and want_dims
-    # ``clean_filters`` больше не используется: зачистка переехала с закрашивания
-    # по растру на вырезание из PDF, где вид зачистки задаётся ролью элемента,
-    # а не списком фильтров. Параметр оставлен, чтобы не ломать вызовы.
-    _ = clean_filters
 
     try:
         document = pymupdf.open(path)
@@ -452,10 +443,9 @@ def extract_pages(
                     # молча деградируют. Причина попадает в meta.
                     text_error = f"{type(exc).__name__}: {exc}"
 
-            # Шаг 6: зачистка листа от того, что размером не является. Идёт
-            # Зачистка уже применена к странице, поэтому отдельной картинки
-            # нет: ``data`` и есть зачищенный лист. Поле ``cleaned`` остаётся
-            # пустым, и ``model_image`` отдаёт ``data``.
+            # Шаг 6: зачистка листа от того, что размером не является, уже применена
+            # к странице (шаг 1б), поэтому отдельной картинки нет: ``data`` и
+            # есть зачищенный лист.
 
             # Шаг 7: подсветка размеров поверх зачистки. Иначе подсветка
             # вернула бы на лист ровно то, что зачистка только что убрала, а
@@ -483,7 +473,6 @@ def extract_pages(
                     text_items=items,
                     dimensions=dims,
                     rejected_numbers=rejected,
-                    cleaned=b"",
                     overlay=overlay_bytes,
                     meta={
                         "dpi": round(72.0 * matrix[0], 1),

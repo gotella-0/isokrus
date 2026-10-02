@@ -314,11 +314,6 @@ DIMSCAN_LABELS: bool = os.getenv("DIMSCAN_LABELS", "0") in {"1", "true", "True"}
 # нужна настоящая выдача. Закрашивание не трогает подписи найденных размеров:
 # на всех десяти листах под проверкой не осталось ни одного задетого размера.
 DIMSCAN_CLEAN: bool = os.getenv("DIMSCAN_CLEAN", "0") in {"1", "true", "True"}
-DIMSCAN_CLEAN_FILTERS: tuple[str, ...] = tuple(
-    part.strip() for part in _env_str("DIMSCAN_CLEAN_FILTERS",
-                                      "signs,leaders,notes,rejected").split(",")
-    if part.strip()
-)
 
 # --- Вырезы для сопоставления текста с графикой ---------------------------
 #
