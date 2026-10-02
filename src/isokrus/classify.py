@@ -22,13 +22,12 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence
 
 import pymupdf
 
 from . import config
-from .raster import as_rgb, crop_bytes
 
 # Роли, которые различает модель. Порядок значим: первая подходящая роль и
 # есть ответ, ``default`` стоит последним.
@@ -52,7 +51,7 @@ _DIGITS = re.compile(r"\d")
 #
 # Голые числа сюда намеренно не попали: «2» — это и номер узла в квадрате,
 # и кусок размера, и номер страницы, и по тексту они неразличимы. Их решает
-# разбор, а не регулярка, — см. :func:`role_of_number`.
+# разбор, а не регулярка, — см. докстринг ``assign_roles``.
 _KEEP, _CUT = True, False
 
 PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
@@ -128,17 +127,6 @@ class Element:
     @property
     def keep(self) -> bool:
         return self.role == ROLE_DIMENSION
-
-
-@dataclass
-class ElementBatch:
-    """Вырезы одного листа."""
-
-    page_number: int
-    elements: list[Element] = field(default_factory=list)
-
-    def by_mark(self) -> dict[str, Element]:
-        return {e.mark: e for e in self.elements}
 
 
 def _digits_present(text: str) -> bool:
@@ -224,66 +212,6 @@ def crop_rect(
                         cx + side / 2, cy + side / 2)
 
 
-def _page_scale(pdf_page: pymupdf.Page, dpi: float, max_side: int) -> float:
-    """Пикселей на пункт с учётом ограничения по стороне."""
-    scale = dpi / 72.0
-    longest = max(pdf_page.rect.width, pdf_page.rect.height) * scale
-    return scale if longest <= max_side else max_side / longest
-
-
-def _crop_pixmap(pixmap: pymupdf.Pixmap, rect: pymupdf.Rect) -> pymupdf.Pixmap:
-    """Вырезать кусок растра (совместимость; основной путь — ``crop_bytes``)."""
-    from .raster import crop_bytes
-
-    array = as_rgb(pixmap)
-    data = crop_bytes(pixmap, array, rect)
-    if not data:
-        return pymupdf.Pixmap(pymupdf.csGRAY, pymupdf.IRect(0, 0, 0, 0), False)
-    return pymupdf.Pixmap(data)
-
-
-def render_crops(
-    pdf_page: pymupdf.Page,
-    elements: Sequence[tuple[str, pymupdf.Rect]],
-    dpi: float | None = None,
-    max_side: int = 0,
-) -> list[tuple[str, pymupdf.Rect, bytes, pymupdf.Rect]]:
-    """Вырезы из одного рендера листа.
-
-    Лист рендерится один раз, а не по разу на элемент: на восьмом листе
-    элементов больше сорока, и сорок рендеров страницы дороже всей остальной
-    подготовки. ``max_side`` по умолчанию не ограничивает: вырезы маленькие,
-    им нужен максимум разрешения, а экономия памяти на всю страницу тут
-    неуместна — лишние два мегабайта никто не заметит, а ступеньки на буквах
-    модель заметит.
-    """
-    if not elements:
-        return []
-    dpi = config.PRUNE_CROP_DPI if dpi is None else dpi
-    scale = _page_scale(pdf_page, dpi, max_side) if max_side else dpi / 72.0
-    pixmap = pdf_page.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
-                                 alpha=False)
-    array = as_rgb(pixmap)
-    origin_x, origin_y = pixmap.irect[0], pixmap.irect[1]
-
-    out: list[tuple[str, pymupdf.Rect, bytes, pymupdf.Rect]] = []
-    for text, box in elements:
-        area = crop_rect(box, pdf_page.rect)
-        cx, cy = (area.x0 + area.x1) / 2, (area.y0 + area.y1) / 2
-        half = max(area.width, area.height) / 2
-        rect_px = pymupdf.Rect(
-            (cx - half) * scale + origin_x, (cy - half) * scale + origin_y,
-            (cx + half) * scale + origin_x, (cy + half) * scale + origin_y,
-        )
-        image = crop_bytes(pixmap, array, rect_px)
-        crop_pt = pymupdf.Rect(
-            rect_px.x0 / scale + origin_x, rect_px.y0 / scale + origin_y,
-            rect_px.x1 / scale + origin_x, rect_px.y1 / scale + origin_y,
-        )
-        out.append((text, box, image, crop_pt))
-    return out
-
-
 def role_of_text(text: str) -> tuple[str, str] | None:
     """Роль элемента по его собственному тексту, без картинки.
 
@@ -295,18 +223,6 @@ def role_of_text(text: str) -> tuple[str, str] | None:
         if pattern.match(normalised):
             return role, reason
     return None
-
-
-def role_of_number(accepted: bool) -> tuple[str, str]:
-    """Роль голого числа — по решению разбора, а не по тексту.
-
-    Голое число неразличимо само в себе: «2» бывает номером узла в квадрате
-    и куском размера. Разбор уже решил это по наличию размерной линии, и его
-    решение здесь единственное, чем можно опереться.
-    """
-    if accepted:
-        return ROLE_DIMENSION, "разбор нашёл для него размерную линию"
-    return ROLE_OTHER, "разбор не нашёл для него размерной линии"
 
 
 def assign_roles(
@@ -364,10 +280,9 @@ def elements_of(
 ) -> list[Element]:
     """Элементы листа с их ролями, **без** вырезов.
 
-    Отделено от :func:`build_batch` не для удобства: рендер вырезов стоит
-    секунды на лист, а план удаления нуждается только в тексте и рамках.
-    Считать вырезы там, где они не показываются модели, — чистая потеря
-    времени, и на десяти листах она превращалась в минуты.
+    Рендер вырезов стоит секунды на лист, а план удаления нуждается только
+    в тексте и рамках. Считать вырезы там, где они не показываются модели, —
+    чистая потеря времени, и на десяти листах она превращалась в минуты.
     """
     chosen = [
         (text, box) for text, box in group_spans(spans_of(pdf_page))
@@ -380,26 +295,3 @@ def elements_of(
         )
         for index, (text, box) in enumerate(chosen, start=1)
     ]
-
-
-def build_batch(
-    pdf_page: pymupdf.Page,
-    dpi: float | None = None,
-    max_side: int = 0,
-    only_with_digits: bool = True,
-) -> ElementBatch:
-    """Вырезы всех подозрительных элементов листа.
-
-    Берутся **все** элементы, где есть цифры, а не только отвергнутые
-    разбором: разбор может ошибиться в обе стороны, и отзыв у модели есть
-    только на элементы, которые ей показали.
-    """
-    elements = elements_of(pdf_page, only_with_digits)
-    crops = render_crops(
-        pdf_page, [(e.text, pymupdf.Rect(e.rect)) for e in elements],
-        dpi, max_side,
-    )
-    for element, (text, box, image, area) in zip(elements, crops, strict=True):
-        element.image = image
-        element.crop = (area.x0, area.y0, area.x1, area.y1)
-    return ElementBatch(page_number=pdf_page.number + 1, elements=elements)

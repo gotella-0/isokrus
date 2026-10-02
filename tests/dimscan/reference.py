@@ -112,14 +112,3 @@ def _greedy(items: Sequence[float], target: float) -> list[float] | None:
             chosen.append(value)
             rest -= value
     return chosen if abs(rest) < 0.5 else None
-
-
-def _greedy(items: Sequence[float], target: float) -> list[float] | None:
-    """Жадный подбор: сперва большие, остаток добираем мелкими."""
-    chosen: list[float] = []
-    rest = target
-    for value in items:
-        if value <= rest + 0.5:
-            chosen.append(value)
-            rest -= value
-    return chosen if abs(rest) < 0.5 else None
