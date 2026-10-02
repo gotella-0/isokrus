@@ -33,7 +33,6 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Sequence
 
@@ -41,7 +40,7 @@ import numpy as np
 import pymupdf
 
 from isokrus.dimscan import DimLine
-from .layout import Layout, Placement, layout_for_page
+from .layout import Placement, layout_for_page
 
 RGB = tuple[float, float, float]
 Pt = tuple[float, float]

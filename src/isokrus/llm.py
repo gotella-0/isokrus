@@ -25,7 +25,7 @@ from pydantic import BaseModel, ValidationError
 from . import config
 from .errors import ConfigError, LLMError
 from .schema import model_to_strict_schema
-from .usage import USAGE, Usage
+from .usage import USAGE, Usage, _estimate_cost
 
 __all__ = ["Usage", "USAGE", "call_structured", "get_client", "build_user_content"]
 
