@@ -699,7 +699,7 @@ def _text_size(page: PageImage) -> float:
     должен быть одинаковым независимо от того, насколько срезали полей.
     """
     width = _png_size(page.full_data)[0]
-    return max(11.0, min(26.0, width / 240.0))
+    return max(13.0, min(32.0, width / 170.0))
 
 
 def _png_size(png: bytes) -> tuple[int, int]:
