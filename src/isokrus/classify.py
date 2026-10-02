@@ -27,8 +27,6 @@ from typing import Sequence
 
 import pymupdf
 
-from . import config
-
 # Роли, которые различает модель. Порядок значим: первая подходящая роль и
 # есть ответ, ``default`` стоит последним.
 ROLE_DIMENSION = "размер"
@@ -178,38 +176,10 @@ def group_spans(
             )
             gap = box.x0 - current.x1
             if same_line and -0.5 <= gap <= max(2.0, 0.6 * box.height):
-                joined = " ".join(parts + [text])
                 merged[-1] = (parts + [text], current | box)
-                del joined
                 continue
         merged.append(([text], pymupdf.Rect(box)))
     return [(" ".join(parts), box) for parts, box in merged]
-
-
-def crop_rect(
-    box: pymupdf.Rect, page: pymupdf.Rect,
-    ratio: float | None = None,
-    pad_ratio: float | None = None,
-    min_ratio: float | None = None,
-) -> pymupdf.Rect:
-    """Вырез вокруг элемента, в пунктах PDF.
-
-    Размер задаётся долей меньшей стороны листа, а не числом пикселей: при
-    смене ``RENDER_DPI`` вырез остаётся тем же куском чертежа, но в большем
-    разрешении. Число пикселей в задании не годится — оно заставляет либо
-    рендерить вырезы в чужом разрешении, либо получать кашу на краях.
-    """
-    share = config.PRUNE_CROP_RATIO if ratio is None else ratio
-    pad = config.PRUNE_CROP_PAD_RATIO if pad_ratio is None else pad_ratio
-    least = config.PRUNE_CROP_MIN_RATIO if min_ratio is None else min_ratio
-
-    least_side = min(page.width, page.height)
-    side = share * least_side
-    side = max(side, box.width * least + 2 * pad * least_side)
-    side = max(side, box.height * least + 2 * pad * least_side)
-    cx, cy = (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2
-    return pymupdf.Rect(cx - side / 2, cy - side / 2,
-                        cx + side / 2, cy + side / 2)
 
 
 def role_of_text(text: str) -> tuple[str, str] | None:
